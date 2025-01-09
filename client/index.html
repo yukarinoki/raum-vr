@@ -35,12 +35,16 @@
       border: 1px solid #ccc;
       cursor: pointer;
       font-size: 14px;
+      user-select: none;
     }
     .square:hover {
       background-color: #ffffe0;
     }
     .selected {
       background-color: yellow !important;
+    }
+    .possible-move {
+      background-color: #90EE90 !important; /* 薄い緑でハイライト */
     }
     .controls {
       margin-bottom: 10px;
@@ -70,9 +74,10 @@
     const sideToMoveSpan = document.getElementById("side-to-move");
 
     let gameId = null;
-    let boardState = {};       // { "Aa1": "R", ... } のような盤面
-    let sideToMove = "white";  // サーバーから取得
-    let selectedSquare = null; // クリックしたマス(移動元)を一時保存
+    let boardState = {};        // { "Aa1": "R", ... } のような盤面
+    let sideToMove = "white";   // サーバーから取得
+    let selectedSquare = null;  // クリックしたマス(移動元)を一時保存
+    let possibleDestinations = []; // サーバーから取得した「移動可能マス」一覧
 
     // FlaskサーバーのURL (適宜修正)
     const SERVER_URL = "http://localhost:5000";
@@ -94,6 +99,7 @@
           sideToMove = data.side_to_move;
           gameIdSpan.textContent = gameId;
           sideToMoveSpan.textContent = sideToMove;
+          // 盤面を再描画
           renderBoard();
         }
       } catch (err) {
@@ -158,6 +164,7 @@
           boardState = data.board;
           sideToMove = data.side_to_move;
           sideToMoveSpan.textContent = sideToMove;
+          // 移動完了後に盤面を再描画
           renderBoard();
         }
       } catch (err) {
@@ -167,14 +174,44 @@
     }
 
     // ------------------------------
-    // 4. 盤面をHTMLに描画
+    // 4. 指定したマスの駒が動けるマスをサーバーから取得
+    // ------------------------------
+    async function fetchPossibleMoves(squareId) {
+      if (!gameId) return [];
+      try {
+        const res = await fetch(`${SERVER_URL}/possible_moves`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            "game_id": gameId,
+            "square": squareId
+          })
+        });
+        const data = await res.json();
+        if (data.error) {
+          alert(data.error);
+          return [];
+        }
+        return data.possible_moves || [];
+      } catch (err) {
+        console.error(err);
+        return [];
+      }
+    }
+
+    // ------------------------------
+    // 5. 盤面をHTMLに描画
     // ------------------------------
     function renderBoard() {
-      boardContainer.innerHTML = "";  // 一旦クリア
+      // 1) いったんHTML要素をクリア
+      boardContainer.innerHTML = "";
+      // 2) 選択状態などをクリア
+      selectedSquare = null;
+      possibleDestinations = [];
 
       const LEVELS = ["A", "B", "C", "D", "E"];
       const ROWS   = ["5", "4", "3", "2", "1"]; 
-        // 表示の都合で上を5行目とし、下が1行目にした例 (お好みで逆でもOK)
+        // 表示の都合で上を5行目, 下を1行目にした例
       const COLS   = ["a", "b", "c", "d", "e"];
 
       // レベルごとに小さな盤を描画
@@ -211,38 +248,65 @@
     }
 
     // ------------------------------
-    // 5. マスをクリックした時の処理
+    // 6. マスをクリックした時の処理
     // ------------------------------
-    function onSquareClick(squareId) {
+    async function onSquareClick(squareId) {
+      // もし現在"移動元"を選択していないなら、このマスを駒の選択元とする
       if (!selectedSquare) {
-        // まだ移動元を選んでいない → 選択状態にする
         selectedSquare = squareId;
-        // 見た目を選択状態にする
-        const elem = document.getElementById(squareId);
-        if (elem) {
-          elem.classList.add("selected");
-        }
+        // ハイライト (選択中マス)
+        highlightSquare(selectedSquare, "selected");
+
+        // サーバーに問い合わせ: この駒が動けるマス
+        const moves = await fetchPossibleMoves(selectedSquare);
+        possibleDestinations = moves;
+
+        // 返ってきた移動先候補をハイライト
+        moves.forEach(toSq => highlightSquare(toSq, "possible-move"));
+
       } else {
-        // すでに移動元を選択している → 移動先
+        // すでに移動元を選択している状態 → 移動先を指定
         const fromSq = selectedSquare;
         const toSq = squareId;
 
         // 選択状態を解除
-        const fromElem = document.getElementById(fromSq);
-        if (fromElem) {
-          fromElem.classList.remove("selected");
-        }
-        selectedSquare = null;
+        unhighlightSquare(fromSq, "selected");
+        // possibleDestinations もハイライト解除
+        possibleDestinations.forEach(dest => unhighlightSquare(dest, "possible-move"));
 
-        // 同じマスをクリックした場合はキャンセル
+        // 移動元と移動先が同じならキャンセル
         if (fromSq === toSq) {
+          selectedSquare = null;
+          possibleDestinations = [];
           return;
         }
 
-        // 移動をサーバーへ送信
-        applyMove(fromSq, toSq);
+        // 移動先が possibleDestinations に含まれていれば、サーバーへ移動適用
+        if (possibleDestinations.includes(toSq)) {
+          await applyMove(fromSq, toSq);
+        }
+        // リセット
+        selectedSquare = null;
+        possibleDestinations = [];
       }
     }
+
+    // ------------------------------
+    // 7. ハイライト用の便利関数
+    // ------------------------------
+    function highlightSquare(squareId, className) {
+      const elem = document.getElementById(squareId);
+      if (elem) {
+        elem.classList.add(className);
+      }
+    }
+    function unhighlightSquare(squareId, className) {
+      const elem = document.getElementById(squareId);
+      if (elem) {
+        elem.classList.remove(className);
+      }
+    }
+
   </script>
 </body>
 </html>

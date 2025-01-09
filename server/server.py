@@ -312,6 +312,41 @@ def apply_move():
     })
 
 
+@app.route("/possible_moves", methods=["POST"])
+def possible_moves():
+    """
+    指定したゲームIDと駒の位置(from_square)から、
+    その駒が動けるマス一覧を返すエンドポイント。
+
+    body: {
+      "game_id": "<uuid>",
+      "square": "Aa2"
+    }
+    """
+    data = request.json
+    game_id = data.get("game_id")
+    from_sq = data.get("square")
+
+    if not game_id or game_id not in games:
+        return jsonify({"error": "Invalid game_id"}), 400
+
+    board = games[game_id]["board"]
+    side_to_move = games[game_id]["side_to_move"]
+
+    # 駒の色が現在の手番(side_to_move)と一致しているか簡易チェック
+    piece = board.get(from_sq, '.')
+    if piece == '.' or get_piece_color(piece) != side_to_move:
+        return jsonify({"error": "Not your piece"}), 400
+
+    # 現在の手番(side_to_move)が指せる全ての手を取得
+    all_moves = generate_all_moves(board, side_to_move)
+
+    # from_sq が一致する(移動元が同じ)手のみフィルタ
+    possible_moves = [move[1] for move in all_moves if move[0] == from_sq]
+
+    return jsonify({"possible_moves": possible_moves})
+
+
 if __name__ == "__main__":
     # デバッグ用
     app.run(host="0.0.0.0", port=5000, debug=True)
