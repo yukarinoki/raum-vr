@@ -1,0 +1,248 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <title>3D Chess (Raumschach) Frontend Sample</title>
+  <style>
+    body {
+      font-family: sans-serif;
+      margin: 20px;
+    }
+    .board-container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 20px;
+      margin: 20px 0;
+    }
+    .level {
+      border: 1px solid #333;
+      padding: 5px;
+    }
+    .level-title {
+      font-weight: bold;
+      margin-bottom: 5px;
+      text-align: center;
+    }
+    .row {
+      display: flex;
+    }
+    .square {
+      width: 30px;  /* 適当なサイズ */
+      height: 30px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid #ccc;
+      cursor: pointer;
+      font-size: 14px;
+    }
+    .square:hover {
+      background-color: #ffffe0;
+    }
+    .selected {
+      background-color: yellow !important;
+    }
+    .controls {
+      margin-bottom: 10px;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>3D Chess (Raumschach) - Frontend Sample</h1>
+
+  <div class="controls">
+    <button id="new-game-btn">New Game</button>
+    <button id="ai-move-btn">AI Move</button>
+    <div>
+      Game ID: <span id="game-id">-</span><br>
+      Side to move: <span id="side-to-move">-</span>
+    </div>
+  </div>
+
+  <div class="board-container" id="board-container">
+    <!-- ここに levels (A,B,C,D,E) が複数レンダリングされる -->
+  </div>
+
+  <script>
+    const boardContainer = document.getElementById("board-container");
+    const gameIdSpan = document.getElementById("game-id");
+    const sideToMoveSpan = document.getElementById("side-to-move");
+
+    let gameId = null;
+    let boardState = {};       // { "Aa1": "R", ... } のような盤面
+    let sideToMove = "white";  // サーバーから取得
+    let selectedSquare = null; // クリックしたマス(移動元)を一時保存
+
+    // FlaskサーバーのURL (適宜修正)
+    const SERVER_URL = "http://localhost:5000";
+
+    // ------------------------------
+    // 1. ゲーム開始 (new_game)
+    // ------------------------------
+    document.getElementById("new-game-btn").addEventListener("click", async () => {
+      try {
+        const res = await fetch(`${SERVER_URL}/new_game`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({})
+        });
+        const data = await res.json();
+        if (data.game_id) {
+          gameId = data.game_id;
+          boardState = data.board;
+          sideToMove = data.side_to_move;
+          gameIdSpan.textContent = gameId;
+          sideToMoveSpan.textContent = sideToMove;
+          renderBoard();
+        }
+      } catch (err) {
+        console.error(err);
+        alert("Failed to start new game.");
+      }
+    });
+
+    // ------------------------------
+    // 2. AI Move (get_move)
+    // ------------------------------
+    document.getElementById("ai-move-btn").addEventListener("click", async () => {
+      if (!gameId) {
+        alert("No game in progress. Click 'New Game' first.");
+        return;
+      }
+      try {
+        const res = await fetch(`${SERVER_URL}/get_move`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ "game_id": gameId })
+        });
+        const data = await res.json();
+        if (data.move) {
+          boardState = data.board;
+          sideToMove = data.side_to_move;
+          sideToMoveSpan.textContent = sideToMove;
+          renderBoard();
+        } else {
+          alert("No move available (maybe checkmate?).");
+        }
+      } catch (err) {
+        console.error(err);
+        alert("Failed to get AI move.");
+      }
+    });
+
+    // ------------------------------
+    // 3. 人間の指し手をサーバーへ適用
+    // ------------------------------
+    async function applyMove(fromSq, toSq) {
+      if (!gameId) {
+        alert("No game in progress.");
+        return;
+      }
+      try {
+        const res = await fetch(`${SERVER_URL}/apply_move`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            "game_id": gameId,
+            "from": fromSq,
+            "to": toSq
+          })
+        });
+        const data = await res.json();
+        if (data.error) {
+          alert(data.error);
+          return;
+        }
+        if (data.success) {
+          boardState = data.board;
+          sideToMove = data.side_to_move;
+          sideToMoveSpan.textContent = sideToMove;
+          renderBoard();
+        }
+      } catch (err) {
+        console.error(err);
+        alert("Failed to apply move.");
+      }
+    }
+
+    // ------------------------------
+    // 4. 盤面をHTMLに描画
+    // ------------------------------
+    function renderBoard() {
+      boardContainer.innerHTML = "";  // 一旦クリア
+
+      const LEVELS = ["A", "B", "C", "D", "E"];
+      const ROWS   = ["5", "4", "3", "2", "1"]; 
+        // 表示の都合で上を5行目とし、下が1行目にした例 (お好みで逆でもOK)
+      const COLS   = ["a", "b", "c", "d", "e"];
+
+      // レベルごとに小さな盤を描画
+      LEVELS.forEach(lvl => {
+        const levelDiv = document.createElement("div");
+        levelDiv.className = "level";
+
+        const levelTitle = document.createElement("div");
+        levelTitle.className = "level-title";
+        levelTitle.textContent = `Level ${lvl}`;
+        levelDiv.appendChild(levelTitle);
+
+        // 5行 × 5列
+        ROWS.forEach(row => {
+          const rowDiv = document.createElement("div");
+          rowDiv.className = "row";
+          COLS.forEach(col => {
+            const squareId = lvl + col + row;  // 例: "Aa1"
+            const squareDiv = document.createElement("div");
+            squareDiv.className = "square";
+            squareDiv.id = squareId;
+            squareDiv.textContent = boardState[squareId] || ".";
+
+            // イベントリスナー
+            squareDiv.addEventListener("click", () => onSquareClick(squareId));
+
+            rowDiv.appendChild(squareDiv);
+          });
+          levelDiv.appendChild(rowDiv);
+        });
+
+        boardContainer.appendChild(levelDiv);
+      });
+    }
+
+    // ------------------------------
+    // 5. マスをクリックした時の処理
+    // ------------------------------
+    function onSquareClick(squareId) {
+      if (!selectedSquare) {
+        // まだ移動元を選んでいない → 選択状態にする
+        selectedSquare = squareId;
+        // 見た目を選択状態にする
+        const elem = document.getElementById(squareId);
+        if (elem) {
+          elem.classList.add("selected");
+        }
+      } else {
+        // すでに移動元を選択している → 移動先
+        const fromSq = selectedSquare;
+        const toSq = squareId;
+
+        // 選択状態を解除
+        const fromElem = document.getElementById(fromSq);
+        if (fromElem) {
+          fromElem.classList.remove("selected");
+        }
+        selectedSquare = null;
+
+        // 同じマスをクリックした場合はキャンセル
+        if (fromSq === toSq) {
+          return;
+        }
+
+        // 移動をサーバーへ送信
+        applyMove(fromSq, toSq);
+      }
+    }
+  </script>
+</body>
+</html>
