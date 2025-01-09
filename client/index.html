@@ -1,33 +1,39 @@
 <!DOCTYPE html>
 <html lang="ja">
+
 <head>
   <meta charset="UTF-8" />
-  <title>3D Chess (Raumschach) Frontend Sample</title>
+  <title>3D Chess (Raumschach) Frontend Sample with Captures</title>
   <style>
     body {
       font-family: sans-serif;
       margin: 20px;
     }
+
     .board-container {
       display: flex;
       flex-wrap: wrap;
       gap: 20px;
       margin: 20px 0;
     }
+
     .level {
       border: 1px solid #333;
       padding: 5px;
     }
+
     .level-title {
       font-weight: bold;
       margin-bottom: 5px;
       text-align: center;
     }
+
     .row {
       display: flex;
     }
+
     .square {
-      width: 30px;  /* 適当なサイズ */
+      width: 30px;
       height: 30px;
       display: flex;
       align-items: center;
@@ -37,20 +43,26 @@
       font-size: 14px;
       user-select: none;
     }
+
     .square:hover {
       background-color: #ffffe0;
     }
+
     .selected {
       background-color: yellow !important;
     }
+
     .possible-move {
-      background-color: #90EE90 !important; /* 薄い緑でハイライト */
+      background-color: #90EE90 !important;
+      /* 移動先候補の緑ハイライト */
     }
+
     .controls {
       margin-bottom: 10px;
     }
   </style>
 </head>
+
 <body>
 
   <h1>3D Chess (Raumschach) - Frontend Sample</h1>
@@ -64,8 +76,15 @@
     </div>
   </div>
 
+  <!-- 追加: 駒の捕獲状況を表示する枠 -->
+  <div>
+    <h3>Captured Pieces</h3>
+    <div>White captured: <span id="white-captured"></span></div>
+    <div>Black captured: <span id="black-captured"></span></div>
+  </div>
+
   <div class="board-container" id="board-container">
-    <!-- ここに levels (A,B,C,D,E) が複数レンダリングされる -->
+    <!-- レベル(A~E)を描画 -->
   </div>
 
   <script>
@@ -73,47 +92,55 @@
     const gameIdSpan = document.getElementById("game-id");
     const sideToMoveSpan = document.getElementById("side-to-move");
 
+    // 新規: 捕獲状況表示要素
+    const whiteCapturedSpan = document.getElementById("white-captured");
+    const blackCapturedSpan = document.getElementById("black-captured");
+
     let gameId = null;
-    let boardState = {};        // { "Aa1": "R", ... } のような盤面
-    let sideToMove = "white";   // サーバーから取得
-    let selectedSquare = null;  // クリックしたマス(移動元)を一時保存
-    let possibleDestinations = []; // サーバーから取得した「移動可能マス」一覧
+    let boardState = {};
+    let sideToMove = "white";
+    let selectedSquare = null;
+    let possibleDestinations = [];
 
-    // FlaskサーバーのURL (適宜修正)
-    const SERVER_URL = "http://localhost:5000";
+    // 追加: 現在の捕獲リスト (サーバーから渡される)
+    let capturedPieces = {
+      white: [],
+      black: []
+    };
 
-    // ------------------------------
-    // 1. ゲーム開始 (new_game)
-    // ------------------------------
-    document.getElementById("new-game-btn").addEventListener("click", async () => {
+    // FlaskサーバーのURL
+    const SERVER_URL = "http://localhost:5001";
+
+    document.getElementById("new-game-btn").addEventListener("click", newGame);
+    document.getElementById("ai-move-btn").addEventListener("click", aiMove);
+
+    async function newGame() {
       try {
         const res = await fetch(`${SERVER_URL}/new_game`, {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({})
+          headers: { "Content-Type": "application/json" }
         });
         const data = await res.json();
         if (data.game_id) {
           gameId = data.game_id;
           boardState = data.board;
           sideToMove = data.side_to_move;
+          capturedPieces = data.captured_pieces ?? { white: [], black: [] };
+
           gameIdSpan.textContent = gameId;
           sideToMoveSpan.textContent = sideToMove;
-          // 盤面を再描画
+          renderCapturedPieces();
           renderBoard();
         }
       } catch (err) {
         console.error(err);
         alert("Failed to start new game.");
       }
-    });
+    }
 
-    // ------------------------------
-    // 2. AI Move (get_move)
-    // ------------------------------
-    document.getElementById("ai-move-btn").addEventListener("click", async () => {
+    async function aiMove() {
       if (!gameId) {
-        alert("No game in progress. Click 'New Game' first.");
+        alert("No game in progress.");
         return;
       }
       try {
@@ -123,23 +150,29 @@
           body: JSON.stringify({ "game_id": gameId })
         });
         const data = await res.json();
-        if (data.move) {
-          boardState = data.board;
-          sideToMove = data.side_to_move;
-          sideToMoveSpan.textContent = sideToMove;
-          renderBoard();
-        } else {
-          alert("No move available (maybe checkmate?).");
+        if (data.move === null) {
+          alert("No move available (maybe checkmate?)");
+          return;
         }
+        if (data.error) {
+          alert(data.error);
+          return;
+        }
+
+        // 更新
+        boardState = data.board;
+        sideToMove = data.side_to_move;
+        capturedPieces = data.captured_pieces ?? capturedPieces;
+
+        sideToMoveSpan.textContent = sideToMove;
+        renderCapturedPieces();
+        renderBoard();
       } catch (err) {
         console.error(err);
         alert("Failed to get AI move.");
       }
-    });
+    }
 
-    // ------------------------------
-    // 3. 人間の指し手をサーバーへ適用
-    // ------------------------------
     async function applyMove(fromSq, toSq) {
       if (!gameId) {
         alert("No game in progress.");
@@ -163,8 +196,10 @@
         if (data.success) {
           boardState = data.board;
           sideToMove = data.side_to_move;
+          capturedPieces = data.captured_pieces ?? capturedPieces;
+
           sideToMoveSpan.textContent = sideToMove;
-          // 移動完了後に盤面を再描画
+          renderCapturedPieces();
           renderBoard();
         }
       } catch (err) {
@@ -173,19 +208,13 @@
       }
     }
 
-    // ------------------------------
-    // 4. 指定したマスの駒が動けるマスをサーバーから取得
-    // ------------------------------
     async function fetchPossibleMoves(squareId) {
       if (!gameId) return [];
       try {
         const res = await fetch(`${SERVER_URL}/possible_moves`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            "game_id": gameId,
-            "square": squareId
-          })
+          body: JSON.stringify({ "game_id": gameId, "square": squareId })
         });
         const data = await res.json();
         if (data.error) {
@@ -199,22 +228,15 @@
       }
     }
 
-    // ------------------------------
-    // 5. 盤面をHTMLに描画
-    // ------------------------------
     function renderBoard() {
-      // 1) いったんHTML要素をクリア
       boardContainer.innerHTML = "";
-      // 2) 選択状態などをクリア
       selectedSquare = null;
       possibleDestinations = [];
 
       const LEVELS = ["A", "B", "C", "D", "E"];
-      const ROWS   = ["5", "4", "3", "2", "1"]; 
-        // 表示の都合で上を5行目, 下を1行目にした例
-      const COLS   = ["a", "b", "c", "d", "e"];
+      const ROWS = ["5", "4", "3", "2", "1"];
+      const COLS = ["a", "b", "c", "d", "e"];
 
-      // レベルごとに小さな盤を描画
       LEVELS.forEach(lvl => {
         const levelDiv = document.createElement("div");
         levelDiv.className = "level";
@@ -224,20 +246,17 @@
         levelTitle.textContent = `Level ${lvl}`;
         levelDiv.appendChild(levelTitle);
 
-        // 5行 × 5列
         ROWS.forEach(row => {
           const rowDiv = document.createElement("div");
           rowDiv.className = "row";
           COLS.forEach(col => {
-            const squareId = lvl + col + row;  // 例: "Aa1"
+            const squareId = lvl + col + row;
             const squareDiv = document.createElement("div");
             squareDiv.className = "square";
             squareDiv.id = squareId;
             squareDiv.textContent = boardState[squareId] || ".";
 
-            // イベントリスナー
             squareDiv.addEventListener("click", () => onSquareClick(squareId));
-
             rowDiv.appendChild(squareDiv);
           });
           levelDiv.appendChild(rowDiv);
@@ -247,66 +266,58 @@
       });
     }
 
-    // ------------------------------
-    // 6. マスをクリックした時の処理
-    // ------------------------------
     async function onSquareClick(squareId) {
-      // もし現在"移動元"を選択していないなら、このマスを駒の選択元とする
+      // 移動元未選択なら
       if (!selectedSquare) {
         selectedSquare = squareId;
-        // ハイライト (選択中マス)
         highlightSquare(selectedSquare, "selected");
 
-        // サーバーに問い合わせ: この駒が動けるマス
+        // 可動マスを取得
         const moves = await fetchPossibleMoves(selectedSquare);
         possibleDestinations = moves;
 
-        // 返ってきた移動先候補をハイライト
-        moves.forEach(toSq => highlightSquare(toSq, "possible-move"));
-
+        // ハイライト
+        moves.forEach(sq => highlightSquare(sq, "possible-move"));
       } else {
-        // すでに移動元を選択している状態 → 移動先を指定
+        // すでに移動元がある状態
         const fromSq = selectedSquare;
         const toSq = squareId;
 
-        // 選択状態を解除
         unhighlightSquare(fromSq, "selected");
-        // possibleDestinations もハイライト解除
-        possibleDestinations.forEach(dest => unhighlightSquare(dest, "possible-move"));
+        possibleDestinations.forEach(sq => unhighlightSquare(sq, "possible-move"));
+        selectedSquare = null;
 
-        // 移動元と移動先が同じならキャンセル
         if (fromSq === toSq) {
-          selectedSquare = null;
+          // 同じマスならキャンセル
           possibleDestinations = [];
           return;
         }
 
-        // 移動先が possibleDestinations に含まれていれば、サーバーへ移動適用
         if (possibleDestinations.includes(toSq)) {
           await applyMove(fromSq, toSq);
         }
-        // リセット
-        selectedSquare = null;
         possibleDestinations = [];
       }
     }
 
-    // ------------------------------
-    // 7. ハイライト用の便利関数
-    // ------------------------------
     function highlightSquare(squareId, className) {
       const elem = document.getElementById(squareId);
-      if (elem) {
-        elem.classList.add(className);
-      }
+      if (elem) elem.classList.add(className);
     }
+
     function unhighlightSquare(squareId, className) {
       const elem = document.getElementById(squareId);
-      if (elem) {
-        elem.classList.remove(className);
-      }
+      if (elem) elem.classList.remove(className);
+    }
+
+    // 追加: 捕獲リストを表示する
+    function renderCapturedPieces() {
+      // 例: whiteCapturedSpan.innerText = "Q,b,n" など
+      whiteCapturedSpan.textContent = capturedPieces.white.join(" ");
+      blackCapturedSpan.textContent = capturedPieces.black.join(" ");
     }
 
   </script>
 </body>
+
 </html>
