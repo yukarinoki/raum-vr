@@ -9,8 +9,10 @@ app = Flask(__name__)
 def after_request(response):
     # 必要なヘッダーを追加
     response.headers.add("Access-Control-Allow-Origin", "*")
-    response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
-    response.headers.add("Access-Control-Allow-Methods", "GET,POST,OPTIONS,DELETE")
+    response.headers.add("Access-Control-Allow-Headers",
+                         "Content-Type,Authorization")
+    response.headers.add("Access-Control-Allow-Methods",
+                         "GET,POST,OPTIONS,DELETE")
     return response
 
 
@@ -63,11 +65,14 @@ def get_square_from_idx(lvl_idx, col_idx, row_idx):
     return LEVELS[lvl_idx] + COLS[col_idx] + ROWS[row_idx]
 
 
-def get_piece_color(piece):
-    """大文字=白, 小文字=黒, '.'=空"""
-    if piece == ".":
-        return None
-    return "white" if piece.isupper() else "black"
+def fix_piece_side(piece, side):
+    """駒の側面を修正する"""
+    if side == "white":
+        return piece.upper()
+    elif side == "black":
+        return piece.lower()
+    else:
+        raise ValueError(f"Invalid side: {side}")
 
 
 def create_empty_board():
@@ -260,6 +265,43 @@ PAWN_PASSIVE_DELTAS = [(1, 0, 0), (0, 0, 1)]
 PAWN_CAPTURE_DELTAS = [(1, -1, 0), (1, 1, 0), (0, -1, 1), (0, 1, 1)]
 
 
+# get_candidate_squares_3d(board, from_square, side_to_move) するときは
+# 1. 現在、自分のkingがチェックされているか確認する
+# 2. その手をしたときに、自分のkingがチェックされるかを確認する
+# 必要な関数は、boardとsideを受け取って、そのsideのkingがチェックされているかを返す関数
+# is_check(board, side) -> bool
+
+def get_king_square(board, side):
+    """指定した side の King の位置を返す"""
+    for lvl in LEVELS:
+        for row in ROWS:
+            for col in COLS:
+                square = lvl + col + row
+                piece = board[square]
+                if piece == fix_piece_side("K", side):
+                    return square
+    return None
+
+
+def is_check(board, side):
+    """指定した side の King が王手かどうかを判定する"""
+    king_square = get_king_square(board, side)
+    for lvl in LEVELS:
+        for row in ROWS:
+            for col in COLS:
+                square = lvl + col + row
+                piece = board[square]
+                if piece == ".":
+                    continue
+                if get_piece_color(piece) == side:
+                    continue
+                candidate_squares = get_candidate_squares_3d(
+                    board, square, get_opponent_side(side), only_pawn_capture=True)
+                if king_square in candidate_squares:
+                    return True
+    return False
+
+
 def slide_in_direction(board, from_square, d_lvl, d_col, d_row, side_to_move):
     """
     from_square から (d_lvl, d_col, d_row) 方向へ
@@ -291,7 +333,7 @@ def slide_in_direction(board, from_square, d_lvl, d_col, d_row, side_to_move):
     return moves
 
 
-def get_candidate_squares_3d(board, from_square, side_to_move, mate_check=False):
+def get_candidate_squares_3d(board, from_square, side_to_move, only_pawn_capture=False):
     """
     from_square にある駒の種類を判別し、
     Raumschachにおける合法手(スライド or ナイトジャンプ)を返す。
@@ -309,28 +351,32 @@ def get_candidate_squares_3d(board, from_square, side_to_move, mate_check=False)
         # Rook
         for d in ROOK_DIRS:
             moves.extend(
-                slide_in_direction(board, from_square, d[0], d[1], d[2], side_to_move)
+                slide_in_direction(board, from_square,
+                                   d[0], d[1], d[2], side_to_move)
             )
 
     elif piece_type == "B":
         # Bishop
         for d in BISHOP_DIRS:
             moves.extend(
-                slide_in_direction(board, from_square, d[0], d[1], d[2], side_to_move)
+                slide_in_direction(board, from_square,
+                                   d[0], d[1], d[2], side_to_move)
             )
 
     elif piece_type == "U":
         # Unicorn
         for d in UNICORN_DIRS:
             moves.extend(
-                slide_in_direction(board, from_square, d[0], d[1], d[2], side_to_move)
+                slide_in_direction(board, from_square,
+                                   d[0], d[1], d[2], side_to_move)
             )
 
     elif piece_type == "Q":
         # Queen = Rook + Bishop + Unicorn
         for d in QUEEN_DIRS:
             moves.extend(
-                slide_in_direction(board, from_square, d[0], d[1], d[2], side_to_move)
+                slide_in_direction(board, from_square,
+                                   d[0], d[1], d[2], side_to_move)
             )
 
     elif piece_type == "N":
@@ -351,7 +397,6 @@ def get_candidate_squares_3d(board, from_square, side_to_move, mate_check=False)
                         moves.append(sq2)
                 # Knightはジャンプなのでそれ以上続かない
 
-    # 他の駒 (King, Pawn など) は省略 (ここに加えてもOK)
     elif piece_type == "K":
         lvl_idx, col_idx, row_idx = get_idx_from_square(from_square)
         for dL, dC, dR in KING_DELTAS:
@@ -370,7 +415,7 @@ def get_candidate_squares_3d(board, from_square, side_to_move, mate_check=False)
 
     elif piece_type == "P":
         lvl_idx, col_idx, row_idx = get_idx_from_square(from_square)
-        if not mate_check:
+        if not only_pawn_capture:
             for dL, dC, dR in PAWN_PASSIVE_DELTAS:
                 if side_to_move == "white":
                     L2 = lvl_idx + dL
@@ -383,7 +428,7 @@ def get_candidate_squares_3d(board, from_square, side_to_move, mate_check=False)
                 if in_range(L2, C2, R2):
                     sq2 = get_square_from_idx(L2, C2, R2)
                     target_piece = board[sq2]
-                    # 味方駒がいる場合はNG
+                    # 味方駒、敵駒がいる場合はNG
                     if target_piece == ".":
                         moves.append(sq2)
         for dL, dC, dR in PAWN_CAPTURE_DELTAS:
@@ -398,9 +443,9 @@ def get_candidate_squares_3d(board, from_square, side_to_move, mate_check=False)
             if in_range(L2, C2, R2):
                 sq2 = get_square_from_idx(L2, C2, R2)
                 target_piece = board[sq2]
-                # 味方駒がいる場合はNG
+                # 味方駒、空白がいる場合はNG
                 if (
-                    get_piece_color(target_piece) != "none"
+                    target_piece != "."
                     and get_piece_color(target_piece) != side_to_move
                 ):
                     moves.append(sq2)
@@ -417,7 +462,7 @@ def get_opponent_side(side_to_move):
         raise ValueError(f"Invalid side_to_move: {side_to_move}")
 
 
-def generate_all_moves(board, side_to_move, mate_check=False):
+def generate_all_moves(board, side_to_move):
     """指定した手番の全ての(雑な)可能手を生成して返す。"""
     moves = []
     for lvl in LEVELS:
@@ -429,14 +474,26 @@ def generate_all_moves(board, side_to_move, mate_check=False):
                     continue
 
                 candidate_squares = get_candidate_squares_3d(
-                    board, from_square, side_to_move, mate_check
+                    board, from_square, side_to_move
                 )
 
-                # 各移動先が空きマス or 敵駒なら move を作る
+                # move が王手にならないかどうかチェック
                 for to_square in candidate_squares:
                     if can_move_to(board, from_square, to_square, side_to_move):
-                        moves.append((from_square, to_square))
-
+                        if piece == "P" and to_square[0] == "E" and to_square[2] == "5":
+                            moves.append((from_square, to_square, "Q"))
+                            moves.append((from_square, to_square, "N"))
+                            moves.append((from_square, to_square, "U"))
+                            moves.append((from_square, to_square, "R"))
+                            moves.append((from_square, to_square, "B"))
+                        elif piece == "p" and to_square[0] == "A" and to_square[2] == "1":
+                            moves.append((from_square, to_square, "q"))
+                            moves.append((from_square, to_square, "n"))
+                            moves.append((from_square, to_square, "u"))
+                            moves.append((from_square, to_square, "r"))
+                            moves.append((from_square, to_square, "b"))
+                        else:
+                            moves.append((from_square, to_square, None))
     return moves
 
 
@@ -498,12 +555,20 @@ def get_candidate_squares_around(board, square):
 
 
 def can_move_to(board, from_square, to_square, side_to_move):
-    """移動先が空きマス or 相手駒なら OK (極めて雑なルール)"""
-    piece_at_to = board[to_square]
-    if piece_at_to == ".":
-        return True
-    # 相手の駒なら取れる
-    return get_piece_color(piece_at_to) != side_to_move
+    """ 王手にならないかどうか """
+
+    old_piece = board[to_square]
+    board[to_square] = board[from_square]
+    board[from_square] = "."
+
+    # 王手になるかどうか
+    is_checking = is_check(board, side_to_move)
+
+    # 元に戻す
+    board[from_square] = board[to_square]
+    board[to_square] = old_piece
+
+    return not is_checking
 
 
 # -----------------------------------
@@ -554,7 +619,7 @@ def get_move():
     if move is None:
         return jsonify({"move": None})
 
-    from_sq, to_sq = move
+    from_sq, to_sq, promotion = move
     target_piece = board[to_sq]  # 移動先の駒(取る駒かもしれない)
     moved_piece = board[from_sq]
 
@@ -565,6 +630,8 @@ def get_move():
         else:
             captured_pieces["black"].append(target_piece)  # 黒が白駒を取った
 
+    if promotion:
+        moved_piece = promotion
     board[to_sq] = moved_piece
     board[from_sq] = "."
 
@@ -582,12 +649,27 @@ def get_move():
     )
 
 
+def check_gameend(board, next_side):
+    is_cheking = is_check(board, next_side)
+    moves = generate_all_moves(board, next_side)
+    is_no_move = len(moves) == 0
+
+    if is_cheking and not moves:
+        return "checkmate"
+    elif not is_cheking and not moves:
+        return "stalemate"
+    else:
+        return "continue"
+
+
 @app.route("/apply_move", methods=["POST"])
 def apply_move():
     data = request.json
     game_id = data.get("game_id")
     from_sq = data.get("from")
     to_sq = data.get("to")
+    promotion = data.get("promotion")
+    print(promotion)
 
     if not game_id or game_id not in games:
         return jsonify({"error": "Invalid game_id"}), 400
@@ -597,7 +679,7 @@ def apply_move():
     captured_pieces = games[game_id]["captured_pieces"]
 
     all_moves = generate_all_moves(board, side_to_move)
-    if (from_sq, to_sq) not in all_moves:
+    if (from_sq, to_sq, promotion) not in all_moves:
         return jsonify({"error": "Illegal move"}), 400
 
     target_piece = board[to_sq]  # 移動先にある駒
@@ -611,6 +693,8 @@ def apply_move():
             captured_pieces["black"].append(target_piece)
 
     # 駒を動かす
+    if promotion:
+        moved_piece = promotion
     board[to_sq] = moved_piece
     board[from_sq] = "."
 
@@ -624,6 +708,8 @@ def apply_move():
             "board": board,
             "side_to_move": next_side,
             "captured_pieces": captured_pieces,
+            "check": is_check(board, next_side),
+            "game_state": check_gameend(board, next_side)
         }
     )
 
