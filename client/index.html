@@ -76,6 +76,10 @@
     </div>
   </div>
 
+  <div>
+      <h3> Game State</h3>
+      <div>State: <span id="game-state"></span></div>
+    </div>
   <!-- 追加: 駒の捕獲状況を表示する枠 -->
   <div>
     <h3>Captured Pieces</h3>
@@ -96,11 +100,16 @@
     const whiteCapturedSpan = document.getElementById("white-captured");
     const blackCapturedSpan = document.getElementById("black-captured");
 
+    const gameStateSpan = document.getElementById("game-state");
+
     let gameId = null;
     let boardState = {};
     let sideToMove = "white";
     let selectedSquare = null;
     let possibleDestinations = [];
+    let check = false;
+    let gameState = "continue";
+
 
     // 追加: 現在の捕獲リスト (サーバーから渡される)
     let capturedPieces = {
@@ -126,6 +135,8 @@
           boardState = data.board;
           sideToMove = data.side_to_move;
           capturedPieces = data.captured_pieces ?? { white: [], black: [] };
+          check = false;
+          gameState = "continue";
 
           gameIdSpan.textContent = gameId;
           sideToMoveSpan.textContent = sideToMove;
@@ -173,21 +184,35 @@
       }
     }
 
-    async function applyMove(fromSq, toSq) {
+    async function applyMove(fromSq, toSq, promoPiece = null) {
       if (!gameId) {
         alert("No game in progress.");
         return;
       }
       try {
-        const res = await fetch(`${SERVER_URL}/apply_move`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            "game_id": gameId,
-            "from": fromSq,
-            "to": toSq
-          })
-        });
+        let res;
+        if (promoPiece === null) {
+            res = await fetch(`${SERVER_URL}/apply_move`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    "game_id": gameId,
+                    "from": fromSq,
+                    "to": toSq
+                })
+            });
+        }else{
+            res = await fetch(`${SERVER_URL}/apply_move`, {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    "game_id": gameId,
+                    "from": fromSq,
+                    "to": toSq,
+                    "promotion": promoPiece
+                })
+            });
+        }
         const data = await res.json();
         if (data.error) {
           alert(data.error);
@@ -197,8 +222,11 @@
           boardState = data.board;
           sideToMove = data.side_to_move;
           capturedPieces = data.captured_pieces ?? capturedPieces;
+          gameState = data.game_state;
+          check = data.check;
 
           sideToMoveSpan.textContent = sideToMove;
+          renderGameState();
           renderCapturedPieces();
           renderBoard();
         }
@@ -229,6 +257,7 @@
     }
 
     function renderBoard() {
+      console.log(boardState);
       boardContainer.innerHTML = "";
       selectedSquare = null;
       possibleDestinations = [];
@@ -267,38 +296,83 @@
     }
 
     async function onSquareClick(squareId) {
-      // 移動元未選択なら
-      if (!selectedSquare) {
-        selectedSquare = squareId;
-        highlightSquare(selectedSquare, "selected");
-
-        // 可動マスを取得
-        const moves = await fetchPossibleMoves(selectedSquare);
-        possibleDestinations = moves;
-
-        // ハイライト
-        moves.forEach(sq => highlightSquare(sq, "possible-move"));
-      } else {
-        // すでに移動元がある状態
-        const fromSq = selectedSquare;
-        const toSq = squareId;
-
-        unhighlightSquare(fromSq, "selected");
-        possibleDestinations.forEach(sq => unhighlightSquare(sq, "possible-move"));
-        selectedSquare = null;
-
-        if (fromSq === toSq) {
-          // 同じマスならキャンセル
-          possibleDestinations = [];
-          return;
+        if (gameState !== "continue") {
+            alert("Game is ended.");
+            return;
         }
 
-        if (possibleDestinations.includes(toSq)) {
-          await applyMove(fromSq, toSq);
+        // まだ移動元が未選択の場合
+        if (!selectedSquare) {
+            selectedSquare = squareId;
+            highlightSquare(selectedSquare, "selected");
+
+            const moves = await fetchPossibleMoves(selectedSquare);
+            possibleDestinations = moves;
+            moves.forEach((sq) => highlightSquare(sq, "possible-move"));
+
+        } else {
+            // 移動元が既に選択されている場合
+            const fromSq = selectedSquare;
+            const toSq = squareId;
+
+            // ハイライト解除
+            unhighlightSquare(fromSq, "selected");
+            possibleDestinations.forEach((sq) => unhighlightSquare(sq, "possible-move"));
+            selectedSquare = null;
+            
+            // 同じマスならキャンセル
+            if (fromSq === toSq) {
+                possibleDestinations = [];
+                return;
+            }
+            
+            // 選択中の移動先候補に含まれているか
+            if (!possibleDestinations.includes(toSq)) {
+                possibleDestinations = [];
+                return;
+            }
+
+            // ---- ここからプロモーション判定を追加 ----
+            // movingPiece が Pawn かどうかを判定 ('P' or 'p')
+            const movingPiece = boardState[fromSq];
+            const isWhitePawn = (movingPiece === "P");
+            const isBlackPawn = (movingPiece === "p");
+
+            // プロモーションが必要になるマス：
+            //   - 白: Level 'E' + 任意の列(a〜e) + Row '1' → E*1 (例: Ea1, Eb1, ...)
+            //   - 黒: Level 'A' + 任意の列(a〜e) + Row '1' → A*1 (例: Aa1, Ab1, ...)
+            //
+            // toSq の文字列構造は "LvlColRow" (例: "Ea1")
+            //   toSq[0] = Lvl (A or E)
+            //   toSq[1] = col (a〜e)
+            //   toSq[2] = row (1〜5)
+            // 白 → E??1, 黒 → A??1 をチェック
+            const isWhitePromotion = isWhitePawn && toSq[0] === "E" && toSq[2] === "5";
+            const isBlackPromotion = isBlackPawn && toSq[0] === "A" && toSq[2] === "1";
+            console.log("L351")
+            if (isWhitePromotion) {
+                // 例: ダイアログを出して駒種類を選ばせる
+                // ここでは単純に prompt() で入力してサーバーへ送る例
+                const promoPiece = prompt(
+                    "White Promotion! Choose one of: Q, R, B, N, U",
+                    "Q"
+                );
+
+                await applyMove(fromSq, toSq, promoPiece);
+            } else if (isBlackPromotion) {
+                const promoPiece = prompt(
+                    "Black Promotion! Choose one of: q, r, b, n, u",
+                    "q"
+                );
+                await applyMove(fromSq, toSq, promoPiece);
+            } else {
+            // 通常の移動
+            await applyMove(fromSq, toSq);
+            }
+            // ---- プロモーション判定ここまで ----
         }
-        possibleDestinations = [];
-      }
     }
+
 
     function highlightSquare(squareId, className) {
       const elem = document.getElementById(squareId);
@@ -315,6 +389,23 @@
       // 例: whiteCapturedSpan.innerText = "Q,b,n" など
       whiteCapturedSpan.textContent = capturedPieces.white.join(" ");
       blackCapturedSpan.textContent = capturedPieces.black.join(" ");
+    }
+
+    function renderGameState() {
+        if (gameState === "checkmate") {
+           gameStateSpan.textContent = "Checkmate!";
+           if (sideToMove === "white") {
+               gameStateSpan.textContent += " Black wins!";
+           } else {
+               gameStateSpan.textContent += " White wins!";
+           }
+        } else if (gameState === "stalemate") {
+            gameStateSpan.textContent = "Stalemate!";
+        } else if (check) {
+            gameStateSpan.textContent = "Check!";
+        } else {
+            gameStateSpan.textContent = "";
+        }
     }
 
   </script>

@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8"/>
+  <title>3D Chess (Raumschach) Frontend Sample</title>
+  <link type="text/css" rel="stylesheet" href="main.css" />
+
+  <!-- importmap を HTML に残す -->
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="container" class="container"></div>
+  <div class="game-info">
+    <button id="new-game-btn">New Game</button>
+    <button id="ai-move-btn">AI Move</button>
+    <button id="3d-btn">3D Board</button>
+    <button id="2d-btn">2D Board</button>
+    <button id="stats"> Stats </button>
+
+    <!-- ここで、gameLogic.jsが参照する要素を配置 -->
+    <div>
+      Game ID: <span id="game-id">-</span><br>
+      Side to move: <span id="side-to-move">-</span>
+    </div>
+    <div>
+      <h3>Captured Pieces</h3>
+      <div>White captured: <span id="white-captured"></span></div>
+      <div>Black captured: <span id="black-captured"></span></div>
+    </div>
+    <div>
+      <h3>Game State</h3>
+      <span id="game-state"></span>
+    </div>
+
+    <div id="board-container" class="board-container" style="display: none;">></div>
+  </div>
+
+  </div>
+
+  <!-- メインのJSを読み込む -->
+  <script>
+    // switch 3D/2D
+    document.getElementById('3d-btn').addEventListener('click', () => {
+      document.getElementById('container').style.display = 'block';
+      document.getElementById('board-container').style.display = 'none';
+    });
+    document.getElementById('2d-btn').addEventListener('click', () => {
+      document.getElementById('container').style.display = 'none';
+      document.getElementById('board-container').style.display = 'flex';
+    });
+    document.getElementById('stats').addEventListener('click', () => {
+      if (document.querySelector("#container > div").style.display === 'block') {
+        document.querySelector("#container > div").style.display = 'none';
+        return;
+      }else{
+        document.querySelector("#container > div").style.display = 'block';
+      }
+    });
+  </script>
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

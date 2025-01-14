@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>three.js webgl - interactive cubes (gpu)</title>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0"
+    />
+    <link type="text/css" rel="stylesheet" href="main.css" />
+
+    <!-- （もとの style タグの内容は main.css に移動しておく） -->
+
+    <!-- importmap を HTML に残す -->
+    <script type="importmap">
+        {
+          "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three/examples/jsm/"
+          }
+        }
+    </script>
+        
+    <!-- script.js をモジュールとして読み込む -->
+    <script type="module" src="script.js"></script>
+  </head>
+  <body>
+    <div id="info">
+      <a href="https://threejs.org" target="_blank" rel="noopener"
+        >three.js</a
+      >
+      webgl - gpu picking
+    </div>
+
+    <div id="container"></div>
+  </body>
+</html>
