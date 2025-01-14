@@ -1,7 +1,7 @@
-# RaumSchacha (3D-Chess) Board
+# RaumSchach (3D-Chess) Board
 
 ## Overview
-**RaumSchacha** is an experimental 3D chess variant, based on [RaumSchach rules](https://www.chessvariants.com/3d.dir/3d5.html). It expands classic chess into an extra dimension, creating a 5×5×5 board with new strategic possibilities. This repository provides a simple Python server and a front-end client for experimenting with these rules.
+**RaumSchach** is an experimental 3D chess variant, based on [RaumSchach rules](https://www.chessvariants.com/3d.dir/3d5.html). It expands classic chess into an extra dimension, creating a 5×5×5 board with new strategic possibilities. This repository provides a simple Python server and a front-end client for experimenting with these rules.
 
 ![Raumschach Display](./img/raum_display.png)
 
